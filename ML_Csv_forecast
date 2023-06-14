@@ -1,0 +1,78 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+import numpy as np
+
+
+# Load and preprocess the data
+data = pd.read_csv('CSV.csv')
+scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(data[['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']])
+
+# Define the number of future predictions and time horizon
+num_predictions = 1
+time_horizon = 7  # Next week
+
+# Split the data into input (X) and target (y) variables
+X = torch.tensor(scaled_data[:-time_horizon], dtype=torch.float32)
+y = torch.tensor(scaled_data[time_horizon:, 3], dtype=torch.float32)  # Close price as the target variable
+
+# Reshape the input data to match the expected input shape of the model
+X = X.unsqueeze(1)  # Add an extra dimension
+input_size = X.shape[2]  # Update the input size
+
+# Define the model
+class MLP(nn.Module):
+    def __init__(self, input_size):
+        super(MLP, self).__init__()
+        self.fc1 = nn.Linear(input_size, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, num_predictions)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x.squeeze()))  # Squeeze the input tensor before passing through the linear layer
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+# Initialize the model and optimizer
+model = MLP(input_size)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+criterion = nn.MSELoss()
+
+# Training loop
+num_epochs = 100
+for epoch in range(1, num_epochs + 1):
+    model.train()
+    optimizer.zero_grad()
+    outputs = model(X)
+    loss = criterion(outputs.squeeze(), y)  # Squeeze the outputs tensor before calculating the loss
+    loss.backward()
+    optimizer.step()
+
+    print(f"Epoch {epoch}/{num_epochs} - Loss: {loss.item()}")
+
+
+# Generate future predictions
+model.eval()
+with torch.no_grad():
+    future_inputs = torch.tensor(scaled_data[-time_horizon:], dtype=torch.float32)
+    future_inputs = future_inputs.unsqueeze(1)
+    future_predictions = model(future_inputs)
+    future_predictions = future_predictions.detach().numpy()
+    future_predictions = future_predictions.reshape(1, -1)
+
+# Reshape future_predictions to match the expected shape
+future_predictions = future_predictions.reshape(1, num_predictions)
+
+# Scale future_predictions to the original range
+min_value = np.min(data['Close'])
+max_value = np.max(data['Close'])
+scaled_predictions = future_predictions * (max_value - min_value) + min_value
+
+# Print future predicted values
+print("Future Predicted Values:")
+for i in range(num_predictions):
+    print(f"Prediction {i+1}: {scaled_predictions[0][i]}")
